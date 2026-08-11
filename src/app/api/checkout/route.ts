@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
         answers: indices,
         times: times,
       },
-      success_url: `${siteUrl}/success?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${siteUrl}/results?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${siteUrl}/results?canceled=1`,
     });
 

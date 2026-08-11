@@ -3,41 +3,112 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { loadAnswers, loadLead } from "@/lib/clientStorage";
-import { computeScoreReport } from "@/lib/scoring";
+import { clearSession, loadAnswers, loadLead, saveAnswers, saveLead } from "@/lib/clientStorage";
+import { computeScoreReport, decodeAnswers } from "@/lib/scoring";
 import type { ScoreReport, AnswerRecord, LeadInfo } from "@/lib/types";
 import { OFFERS } from "@/lib/offers";
 import { Button } from "./Button";
+
+interface Session {
+  lead: LeadInfo;
+  answers: AnswerRecord[];
+  report: ScoreReport;
+  unlocked: boolean;
+}
 
 export function ResultsView() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const canceled = searchParams.get("canceled") === "1";
+  const sessionId = searchParams.get("session_id");
 
-  const [session, setSession] = useState<{
-    lead: LeadInfo;
-    answers: AnswerRecord[];
-    report: ScoreReport;
-  } | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Test data lives in sessionStorage (client-only), so it must be hydrated
-    // after mount rather than during the initial (server-matching) render.
-    const l = loadLead();
-    const a = loadAnswers();
-    if (!l || !a) {
-      router.replace("/start");
-      return;
-    }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSession({ lead: l, answers: a, report: computeScoreReport(a) });
-  }, [router]);
+    let cancelled = false;
 
+    async function hydrate() {
+      // Paid redirect from Stripe — verify server-side rather than trusting the URL.
+      if (sessionId) {
+        try {
+          const res = await fetch("/api/verify-checkout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.paid) {
+            throw new Error(data.error ?? "Payment could not be verified.");
+          }
+          if (cancelled) return;
+          clearSession();
+          setSession({
+            lead: data.lead,
+            answers: data.answers,
+            report: data.report,
+            unlocked: true,
+          });
+        } catch (err) {
+          if (!cancelled) {
+            setVerifyError(
+              err instanceof Error ? err.message : "Payment could not be verified."
+            );
+          }
+        }
+        return;
+      }
+
+      // Same-tab, just-finished-the-test path.
+      const storedLead = loadLead();
+      const storedAnswers = loadAnswers();
+      if (storedLead && storedAnswers) {
+        if (!cancelled) {
+          setSession({
+            lead: storedLead,
+            answers: storedAnswers,
+            report: computeScoreReport(storedAnswers),
+            unlocked: false,
+          });
+        }
+        return;
+      }
+
+      // Emailed link opened on a different device/browser — self-contained in the URL.
+      const a = searchParams.get("a");
+      const t = searchParams.get("t");
+      const email = searchParams.get("email");
+      if (a && t && email) {
+        const lead: LeadInfo = {
+          name: searchParams.get("name") ?? "",
+          email,
+          phone: searchParams.get("phone") ?? "",
+        };
+        const answers = decodeAnswers(a, t);
+        saveLead(lead);
+        saveAnswers(answers);
+        if (!cancelled) {
+          setSession({ lead, answers, report: computeScoreReport(answers), unlocked: false });
+        }
+        return;
+      }
+
+      router.replace("/start");
+    }
+
+    hydrate();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
+  const report = session?.report ?? null;
   const lead = session?.lead ?? null;
   const answers = session?.answers ?? null;
-  const report = session?.report ?? null;
+  const unlocked = session?.unlocked ?? false;
 
   const scoreOutOf = 800;
   const scoreFillPct = useMemo(
@@ -48,7 +119,7 @@ export function ResultsView() {
   async function handleUnlock() {
     if (!lead || !answers) return;
     setSubmitting(true);
-    setError(null);
+    setCheckoutError(null);
     try {
       const res = await fetch("/api/checkout", {
         method: "POST",
@@ -61,9 +132,26 @@ export function ResultsView() {
       }
       window.location.href = data.url;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setCheckoutError(
+        err instanceof Error ? err.message : "Something went wrong. Please try again."
+      );
       setSubmitting(false);
     }
+  }
+
+  if (verifyError) {
+    return (
+      <div className="container-page flex min-h-[60vh] flex-col items-center justify-center text-center">
+        <h1 className="font-display text-2xl font-semibold text-ink">
+          We couldn&apos;t verify your payment
+        </h1>
+        <p className="mt-3 max-w-md text-sm text-ink-soft">{verifyError}</p>
+        <p className="mt-2 max-w-md text-sm text-ink-soft">
+          If you were charged, your results were also emailed to you. Otherwise, please try
+          unlocking again.
+        </p>
+      </div>
+    );
   }
 
   if (!report || !lead) {
@@ -76,7 +164,7 @@ export function ResultsView() {
 
   return (
     <div className="container-page py-14 sm:py-20">
-      {canceled && (
+      {canceled && !unlocked && (
         <div className="mb-8 rounded-xl border border-gold-ink/30 bg-paper-soft px-5 py-3 text-sm text-ink-soft">
           Checkout was canceled — your results are still saved. Unlock whenever you&apos;re ready.
         </div>
@@ -119,66 +207,86 @@ export function ResultsView() {
         </div>
       </div>
 
+      {unlocked && (
+        <div className="mx-auto mt-8 max-w-xl rounded-xl border border-emerald-ink/30 bg-paper-soft px-5 py-3 text-center text-sm text-emerald-ink">
+          ✓ Full report unlocked — also emailed to {lead.email}
+        </div>
+      )}
+
       <div className="mx-auto mt-12 grid max-w-3xl grid-cols-1 gap-6 sm:grid-cols-2">
         {report.categories.map((c) => (
-          <div key={c.category} className="relative overflow-hidden rounded-2xl border border-line bg-white p-6">
+          <div
+            key={c.category}
+            className="relative overflow-hidden rounded-2xl border border-line bg-white p-6"
+          >
             <div className="flex items-center justify-between">
               <h3 className="font-display text-base font-semibold text-ink">{c.label}</h3>
               <span className="text-sm font-semibold text-gold-ink">{c.accuracyPct}%</span>
             </div>
             <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-line">
-              <div className="h-full rounded-full bg-navy-deep" style={{ width: `${c.accuracyPct}%` }} />
+              <div
+                className="h-full rounded-full bg-navy-deep"
+                style={{ width: `${c.accuracyPct}%` }}
+              />
             </div>
-            <div className="mt-4 select-none blur-sm" aria-hidden="true">
-              <p className="text-xs text-ink-soft">
-                Avg response time · {c.avgTimeSec}s · Percentile rank · Strength notes
+            {unlocked ? (
+              <p className="mt-4 text-xs text-ink-soft">
+                {c.correct}/{c.total} correct &middot; Avg response time {c.avgTimeSec}s
               </p>
-            </div>
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex h-14 items-end justify-center bg-gradient-to-t from-white via-white/90 to-transparent pb-2 text-xs font-semibold text-ink-soft">
-              Unlock to view detail
-            </div>
+            ) : (
+              <>
+                <div className="mt-4 select-none blur-sm" aria-hidden="true">
+                  <p className="text-xs text-ink-soft">
+                    Avg response time · {c.avgTimeSec}s · Percentile rank · Strength notes
+                  </p>
+                </div>
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 flex h-14 items-end justify-center bg-gradient-to-t from-white via-white/90 to-transparent pb-2 text-xs font-semibold text-ink-soft">
+                  Unlock to view detail
+                </div>
+              </>
+            )}
           </div>
         ))}
       </div>
 
-      {/* Paywall */}
-      <div className="mx-auto mt-14 max-w-2xl rounded-3xl border border-line bg-paper-soft p-8 text-center sm:p-12">
-        <Image
-          src="/images/seal-badge.webp"
-          alt=""
-          width={72}
-          height={72}
-          className="mx-auto rounded-full"
-        />
-        <h2 className="mt-5 font-display text-2xl font-semibold text-ink">
-          Unlock your full Mastery Report
-        </h2>
-        <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-ink-soft">
-          Get your complete category breakdown, response-time analysis, percentile detail, and a
-          full explanation for every question — emailed to {lead.email}.
-        </p>
-        <div className="mt-6 flex items-center justify-center gap-3">
-          <span className="font-display text-xl text-ink-soft line-through">$9.99</span>
-          <span className="font-display text-4xl font-semibold text-ink">$1.99</span>
-          <span className="rounded-full bg-gold-soft px-3 py-1 text-xs font-bold uppercase tracking-wide text-gold-ink">
-            Today only
-          </span>
+      {!unlocked && (
+        <div className="mx-auto mt-14 max-w-2xl rounded-3xl border border-line bg-paper-soft p-8 text-center sm:p-12">
+          <Image
+            src="/images/seal-badge.webp"
+            alt=""
+            width={72}
+            height={72}
+            className="mx-auto rounded-full"
+          />
+          <h2 className="mt-5 font-display text-2xl font-semibold text-ink">
+            Unlock your full Mastery Report
+          </h2>
+          <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-ink-soft">
+            Get your complete category breakdown, response-time analysis, percentile detail, and
+            a full explanation for every question — emailed to {lead.email}.
+          </p>
+          <div className="mt-6 flex items-center justify-center gap-3">
+            <span className="font-display text-xl text-ink-soft line-through">$9.99</span>
+            <span className="font-display text-4xl font-semibold text-ink">$1.99</span>
+            <span className="rounded-full bg-gold-soft px-3 py-1 text-xs font-bold uppercase tracking-wide text-gold-ink">
+              Today only
+            </span>
+          </div>
+          {checkoutError && <p className="mt-4 text-sm text-danger">{checkoutError}</p>}
+          <Button
+            variant="primary"
+            className="mt-7 w-full sm:w-auto"
+            onClick={handleUnlock}
+            disabled={submitting}
+          >
+            {submitting ? "Redirecting to secure checkout…" : "Unlock full report — $1.99 →"}
+          </Button>
+          <p className="mt-4 text-xs text-ink-soft">
+            Secure payment via Stripe. One-time charge, no subscription.
+          </p>
         </div>
-        {error && <p className="mt-4 text-sm text-danger">{error}</p>}
-        <Button
-          variant="primary"
-          className="mt-7 w-full sm:w-auto"
-          onClick={handleUnlock}
-          disabled={submitting}
-        >
-          {submitting ? "Redirecting to secure checkout…" : "Unlock full report — $1.99 →"}
-        </Button>
-        <p className="mt-4 text-xs text-ink-soft">
-          Secure payment via Stripe. One-time charge, no subscription.
-        </p>
-      </div>
+      )}
 
-      {/* Upsell preview */}
       <div className="mx-auto mt-16 max-w-3xl">
         <p className="text-center text-sm font-semibold uppercase tracking-[0.12em] text-gold-ink">
           Also available after purchase

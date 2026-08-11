@@ -47,6 +47,15 @@ export function TestRunner() {
 
       if (isLast) {
         saveAnswers(answersRef.current);
+        const lead = loadLead();
+        if (lead) {
+          // Fire-and-forget — the teaser email shouldn't block navigation to results.
+          fetch("/api/teaser-email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lead, answers: answersRef.current }),
+          }).catch(() => {});
+        }
         router.push("/results");
         return;
       }

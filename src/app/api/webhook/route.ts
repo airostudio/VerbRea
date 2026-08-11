@@ -40,11 +40,13 @@ export async function POST(req: NextRequest) {
       const answers = decodeAnswers(meta.answers, meta.times);
       const report = computeScoreReport(answers);
       const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? req.nextUrl.origin;
+      const resultsUrl = `${siteUrl}/results?session_id=${encodeURIComponent(session.id)}`;
 
       await sendResultsEmail({
         lead: { name: meta.name ?? "", email: meta.email, phone: meta.phone ?? "" },
         report,
         answers,
+        resultsUrl,
         siteUrl,
       });
     } catch (err) {
