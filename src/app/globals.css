@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+:root {
+  /* Neutral canvas */
+  --paper: #ffffff;
+  --paper-soft: #f7f8fb;
+  --ink: #10161f;
+  --ink-soft: #47505f;
+  --line: #e3e6ec;
+
+  /* Deep navy — hero / footer / certificate sections */
+  --navy-deep: #070c14;
+  --navy: #0b1526;
+  --navy-mid: #132038;
+  --navy-line: rgba(255, 255, 255, 0.12);
+  --on-navy: #f5f7fb;
+  --on-navy-soft: #b9c2d0;
+
+  /* Accents (AA-checked against their intended background) */
+  --gold: #d9b366; /* on navy */
+  --gold-soft: #f0d9a8; /* on navy */
+  --gold-ink: #8a641a; /* on paper — 4.6:1+ */
+  --emerald: #3fbe8e; /* on navy */
+  --emerald-ink: #157a56; /* on paper */
+  --rose-ink: #9c3f66; /* on paper, category accent */
+  --blue-ink: #29628f; /* on paper, category accent */
+  --danger: #c23a3a;
+
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-soft: var(--paper-soft);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-line: var(--line);
+
+  --color-navy-deep: var(--navy-deep);
+  --color-navy: var(--navy);
+  --color-navy-mid: var(--navy-mid);
+  --color-on-navy: var(--on-navy);
+  --color-on-navy-soft: var(--on-navy-soft);
+
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
+  --color-gold-ink: var(--gold-ink);
+  --color-emerald: var(--emerald);
+  --color-emerald-ink: var(--emerald-ink);
+  --color-rose-ink: var(--rose-ink);
+  --color-blue-ink: var(--blue-ink);
+  --color-danger: var(--danger);
+
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-feature-settings: "cv11", "ss01";
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+::selection {
+  background: var(--gold-soft);
+  color: var(--navy-deep);
+}
+
+/* Consistent, visible focus ring for keyboard users across all platforms */
+:focus-visible {
+  outline: 2px solid var(--gold-ink);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.container-page {
+  width: 100%;
+  max-width: 72rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
+}
+
+@media (min-width: 640px) {
+  .container-page {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}
